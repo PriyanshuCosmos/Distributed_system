@@ -1,0 +1,142 @@
+services:
+  # ----------------------------------------------------------------------------
+  # PostgreSQL: Durable Source of Truth for Jobs, Attempts, and Outbox Events
+  # ----------------------------------------------------------------------------
+  postgres:
+    image: postgres:16-alpine
+    container_name: taskflow-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: taskflow
+      POSTGRES_PASSWORD: taskflow
+      POSTGRES_DB: taskflow
+    ports:
+      - "5432:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U taskflow -d taskflow"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  # ----------------------------------------------------------------------------
+  # Redis: High-Performance Priority Queue, Scheduled Sets, and Worker Leases
+  # ----------------------------------------------------------------------------
+  redis:
+    image: redis:7-alpine
+    container_name: taskflow-redis
+    restart: unless-stopped
+    ports:
+      - "6379:6379"
+    volumes:
+      - redisdata:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+
+  # ----------------------------------------------------------------------------
+  # API Service: FastAPI REST Gateway and Web Dashboard
+  # ----------------------------------------------------------------------------
+  api:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: taskflow-api
+    restart: unless-stopped
+    command: ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000"]
+    environment:
+      - ENVIRONMENT=production
+      - DATABASE_URL=postgresql+psycopg://taskflow:taskflow@postgres:5432/taskflow
+      - SYNC_DATABASE_URL=postgresql+psycopg://taskflow:taskflow@postgres:5432/taskflow
+      - REDIS_URL=redis://redis:6379/0
+      - USE_FAKEREDIS=false
+      - LOG_LEVEL=INFO
+    ports:
+      - "8000:8000"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/api/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+
+  # ----------------------------------------------------------------------------
+  # Worker Replica 1: Distributed Job Consumer
+  # ----------------------------------------------------------------------------
+  worker-1:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: taskflow-worker-1
+    restart: unless-stopped
+    command: ["python", "-m", "app.workers.worker"]
+    environment:
+      - ENVIRONMENT=production
+      - DATABASE_URL=postgresql+psycopg://taskflow:taskflow@postgres:5432/taskflow
+      - REDIS_URL=redis://redis:6379/0
+      - USE_FAKEREDIS=false
+      - WORKER_ID=worker-node-1
+      - WORKER_CONCURRENCY=4
+      - LOG_LEVEL=INFO
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+
+  # ----------------------------------------------------------------------------
+  # Worker Replica 2: Concurrent Worker Node Demonstrating Distributed Scale
+  # ----------------------------------------------------------------------------
+  worker-2:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: taskflow-worker-2
+    restart: unless-stopped
+    command: ["python", "-m", "app.workers.worker"]
+    environment:
+      - ENVIRONMENT=production
+      - DATABASE_URL=postgresql+psycopg://taskflow:taskflow@postgres:5432/taskflow
+      - REDIS_URL=redis://redis:6379/0
+      - USE_FAKEREDIS=false
+      - WORKER_ID=worker-node-2
+      - WORKER_CONCURRENCY=4
+      - LOG_LEVEL=INFO
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+
+  # ----------------------------------------------------------------------------
+  # Scheduler Service: Scheduled Job Dispatch, Outbox Sweeper & Stale Lease Reaper
+  # ----------------------------------------------------------------------------
+  scheduler:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: taskflow-scheduler
+    restart: unless-stopped
+    command: ["python", "-m", "app.scheduler"]
+    environment:
+      - ENVIRONMENT=production
+      - DATABASE_URL=postgresql+psycopg://taskflow:taskflow@postgres:5432/taskflow
+      - REDIS_URL=redis://redis:6379/0
+      - USE_FAKEREDIS=false
+      - LOG_LEVEL=INFO
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+
+volumes:
+  pgdata:
+  redisdata:
