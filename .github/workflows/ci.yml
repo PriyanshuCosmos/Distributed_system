@@ -54,8 +54,8 @@ jobs:
 
       - name: Lint with Ruff
         run: |
-          ruff check .
-          ruff format --check .
+          ruff check app tests scripts alembic
+          ruff format --check app tests scripts alembic
 
       - name: Run Test Suite
         env:

@@ -78,7 +78,7 @@ A naive implementation writes to PostgreSQL and then writes to Redis:
 ```python
 # ANTI-PATTERN: Dual Write
 await db.save(job)
-await redis.enqueue(job) # IF THIS FAILS, JOB IS LOST IN THE QUEUE FOREVER
+await redis.enqueue(job)  # IF THIS FAILS, JOB IS LOST IN THE QUEUE FOREVER
 ```
 If the network partition occurs, Redis crashes, or the process dies after `db.save(job)` but before `redis.enqueue(job)`, the job is persisted in the database as `QUEUED`, but the worker never executes it.
 
